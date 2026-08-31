@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<glyph name="r" format="1">
+  <advance width="1233"/>
+  <unicode hex="0072"/>
+  <outline>
+    <contour>
+      <point x="404" y="1120" type="line"/>
+      <point x="568" y="1120" type="line"/>
+      <point x="548" y="901" type="line"/>
+      <point x="637.62" y="1060.32"/>
+      <point x="783.137" y="1147"/>
+      <point x="963.814" y="1147" type="curve" smooth="yes"/>
+      <point x="1057.95" y="1147"/>
+      <point x="1132.45" y="1123.47"/>
+      <point x="1189" y="1075" type="curve"/>
+      <point x="1154" y="889" type="line"/>
+      <point x="1090.22" y="948.663"/>
+      <point x="1013.91" y="977"/>
+      <point x="919.89" y="977" type="curve" smooth="yes"/>
+      <point x="695.582" y="977"/>
+      <point x="530.137" y="815.701"/>
+      <point x="478" y="549" type="curve" smooth="yes"/>
+      <point x="371" y="0" type="line"/>
+      <point x="187" y="0" type="line"/>
+    </contour>
+  </outline>
+  <lib>
+  <dict>
+    <key>com.schriftgestaltung.Glyphs.lastChange</key>
+    <string>2017-07-11 17:15:08 +0000</string>
+  </dict>
+  </lib>
+</glyph>
