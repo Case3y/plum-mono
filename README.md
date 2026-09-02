@@ -3,6 +3,8 @@
 
 A monospaced typeface for source code, based on [Hack](https://github.com/source-foundry/Hack).
 
+![Plum Mono Showcase](imgs/plummono_showcase.png)
+
 ---
 
 ## About
@@ -38,6 +40,7 @@ The following glyphs were replaced with versions from DejaVu Sans Mono and **bol
 - **Asterisk** `*` — vertically centered to align with `+`
 - **Underscore** `_` — extended to full width so adjacent underscores connect (`__` → no gap)
 - **Digit** `1` — top serif angle adjusted to a middle ground between Hack and DejaVu
+- **Digit** `0` — slashed zero with consistent slash width across all weights (Regular, Italic, Bold, Bold Italic)
 
 ---
 
