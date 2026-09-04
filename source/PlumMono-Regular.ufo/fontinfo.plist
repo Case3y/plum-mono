@@ -101,7 +101,7 @@ Except as contained in this notice, the names of Gnome, the Gnome Foundation, an
 	<key>openTypeNameUniqueID</key>
 	<string>PlumMono: 2026</string>
 	<key>openTypeNameVersion</key>
-	<string>Version 1.001</string>
+	<string>Version 1.002</string>
 	<key>openTypeOS2CodePageRanges</key>
 	<array>
 		<integer>0</integer>
@@ -274,7 +274,7 @@ Except as contained in this notice, the names of Gnome, the Gnome Foundation, an
 	<key>versionMajor</key>
 	<integer>1</integer>
 	<key>versionMinor</key>
-	<integer>1</integer>
+	<integer>2</integer>
 	<key>xHeight</key>
 	<integer>1120</integer>
 </dict>
