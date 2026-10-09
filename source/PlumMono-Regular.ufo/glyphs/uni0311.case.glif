@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<glyph name="uni0311.case" format="1">
+  <advance width="0"/>
+  <outline>
+    <contour>
+      <point x="-930" y="1659" type="line" name="sv01"/>
+      <point x="-914" y="1820"/>
+      <point x="-810" y="1901"/>
+      <point x="-617" y="1901" type="curve" smooth="yes" name="hr01"/>
+      <point x="-425" y="1901"/>
+      <point x="-332" y="1818"/>
+      <point x="-308" y="1696" type="curve" smooth="yes" name="hr02"/>
+      <point x="-305" y="1681"/>
+      <point x="-304" y="1671"/>
+      <point x="-303" y="1659" type="curve"/>
+      <point x="-422" y="1659" type="line" name="dh01"/>
+      <point x="-441" y="1733"/>
+      <point x="-506" y="1770"/>
+      <point x="-615" y="1770" type="curve" smooth="yes" name="sv02"/>
+      <point x="-728" y="1770"/>
+      <point x="-794" y="1731"/>
+      <point x="-811" y="1659" type="curve" name="sv03"/>
+    </contour>
+  </outline>
+</glyph>

@@ -1577,6 +1577,73 @@
 		<string>napostrophe</string>
 		<string>Ubreve</string>
 		<string>ubreve</string>
+		<string>uni0302</string>
+		<string>uni0304</string>
+		<string>uni0304.case</string>
+		<string>uni0305</string>
+		<string>uni0306</string>
+		<string>uni0306.case</string>
+		<string>uni0307</string>
+		<string>uni0307.case</string>
+		<string>uni0308</string>
+		<string>uni030A</string>
+		<string>uni030B</string>
+		<string>uni030B.case</string>
+		<string>uni030C</string>
+		<string>uni030D</string>
+		<string>uni030E</string>
+		<string>uni030F</string>
+		<string>uni030F.case</string>
+		<string>uni0310</string>
+		<string>uni0311</string>
+		<string>uni0311.case</string>
+		<string>uni0312</string>
+		<string>uni0313</string>
+		<string>uni0314</string>
+		<string>uni0315</string>
+		<string>uni0316</string>
+		<string>uni0317</string>
+		<string>uni0318</string>
+		<string>uni0319</string>
+		<string>uni031A</string>
+		<string>uni031B</string>
+		<string>uni031C</string>
+		<string>uni031D</string>
+		<string>uni031E</string>
+		<string>uni031F</string>
+		<string>uni0320</string>
+		<string>uni0321</string>
+		<string>uni0322</string>
+		<string>uni0324</string>
+		<string>uni0325</string>
+		<string>uni0326</string>
+		<string>uni0327</string>
+		<string>uni0328</string>
+		<string>uni0329</string>
+		<string>uni032A</string>
+		<string>uni032B</string>
+		<string>uni032C</string>
+		<string>uni032D</string>
+		<string>uni032E</string>
+		<string>uni032F</string>
+		<string>uni0330</string>
+		<string>uni0331</string>
+		<string>uni0332</string>
+		<string>uni0333</string>
+		<string>uni0334</string>
+		<string>uni0335</string>
+		<string>uni0336</string>
+		<string>uni0337</string>
+		<string>uni0338</string>
+		<string>uni0339</string>
+		<string>uni033A</string>
+		<string>uni033B</string>
+		<string>uni033C</string>
+		<string>uni033D</string>
+		<string>uni033E</string>
+		<string>uni033F</string>
+		<string>uni0358</string>
+		<string>uni0361</string>
 	</array>
 </dict>
 </plist>
