@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # /////////////////////////////////////////////////////////////////
 #
-#  Usage: python build_latest.py [ttf|woff|woff2|subsets|all]
+#  Usage: python build_latest.py [ttf|woff|woff2|all]
 #                            (--amount N) (--no-embolden) (--install-deps)
 #
 #  This is build.py with two changes:
@@ -31,7 +31,7 @@
 #
 #  Output layout:
 #    build/ttf/          unhinted ttf files
-#    build/web/fonts/    woff + woff2 (complete and subset sets)
+#    build/web/fonts/    woff + woff2
 #
 #  Dependencies (conda activate develop):
 #    fontmake, fonttools, zopfli, brotli (pip)
@@ -58,9 +58,8 @@ REPO_ROOT = Path(__file__).resolve().parent
 MASTER_TTF = REPO_ROOT / "master_ttf"
 TTF_BUILD = REPO_ROOT / "build" / "ttf"
 WEB_BUILD = REPO_ROOT / "build" / "web" / "fonts"
-TEMP_SOURCE = REPO_ROOT / "source" / "temp"
 
-# web font output names (lowercase: plummono-<style>[-subset].woff[2])
+# web font output names (lowercase: plummono-<style>.woff[2])
 WEB_NAMES = {
     "Regular": "plummono-regular",
     "Bold": "plummono-bold",
@@ -143,12 +142,10 @@ def clean_master_ttf():
         remove_dir(MASTER_TTF)
 
 
-def run_fontmake(ufo_path, subset=False):
+def run_fontmake(ufo_path):
     """Build one UFO source to a ttf in master_ttf/ (fontmake's default output
     directory for static ttf builds)."""
     command = [shutil.which("fontmake")]
-    if subset:
-        command.append("--subset")
     command += ["-u", str(ufo_path), "-o", "ttf"]
     result = subprocess.run(command, cwd=REPO_ROOT)
     if result.returncode != 0:
@@ -388,62 +385,6 @@ def build_woff2():
         print(f"{variant} woff2 build path: {WEB_BUILD / f'{WEB_NAMES[variant]}.woff2'}")
 
 
-def build_subsets(amount, embolden):
-    confirm_dependencies(require_ffpython=(embolden and amount > 0))
-    clean_master_ttf()
-
-    # create temporary source files with lib.plist replacements that include
-    # the subset definitions from source/subset-lib
-    if TEMP_SOURCE.exists():
-        shutil.rmtree(TEMP_SOURCE)
-    TEMP_SOURCE.mkdir()
-
-    subset_lib = REPO_ROOT / "source" / "subset-lib"
-    for variant in VARIANTS:
-        temp_ufo = TEMP_SOURCE / f"PlumMono-{variant}.ufo"
-        shutil.copytree(REPO_ROOT / "source" / f"PlumMono-{variant}.ufo", temp_ufo)
-        shutil.copy2(subset_lib / f"lib-{variant.lower()}.plist", temp_ufo / "lib.plist")
-
-    print("Starting web font subset build...")
-    print(" ")
-    for variant in VARIANTS:
-        run_fontmake(TEMP_SOURCE / f"PlumMono-{variant}.ufo", subset=True)
-
-    # keep the light subsets at the same weight as the full fonts
-    if embolden and amount > 0:
-        embolden_light_weights(amount)
-
-    apply_postbuild_fixes()
-
-    enable_zopfli_woff()
-    WEB_BUILD.mkdir(parents=True, exist_ok=True)
-
-    for variant in VARIANTS:
-        ttf_path = MASTER_TTF / f"PlumMono-{variant}.ttf"
-        try:
-            convert_web_font(ttf_path, WEB_BUILD / f"{WEB_NAMES[variant]}-subset.woff", "woff")
-        except OSError as error:
-            fail(f"Failed to build woff subset from {ttf_path.name}: {error}")
-        print(f"{variant} woff subset successfully built from {ttf_path.name}")
-    print(" ")
-    for variant in VARIANTS:
-        ttf_path = MASTER_TTF / f"PlumMono-{variant}.ttf"
-        try:
-            convert_web_font(ttf_path, WEB_BUILD / f"{WEB_NAMES[variant]}-subset.woff2", "woff2")
-        except OSError as error:
-            fail(f"Failed to build woff2 subset from {ttf_path.name}: {error}")
-        print(f"{variant} woff2 font subset successfully built from {ttf_path.name}")
-
-    print(" ")
-    print("Moving web font subset files to build directory...")
-    for variant in VARIANTS:
-        print(f"{variant} woff build path: {WEB_BUILD / f'{WEB_NAMES[variant]}-subset.woff'}")
-        print(f"{variant} woff2 build path: {WEB_BUILD / f'{WEB_NAMES[variant]}-subset.woff2'}")
-
-    remove_dir(MASTER_TTF)
-    remove_dir(TEMP_SOURCE)
-
-
 def install_deps():
     print("Installing Python build dependencies with pip...")
     subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade",
@@ -463,8 +404,8 @@ def main():
                     "(unhinted builds + light-weight emboldening of "
                     "Regular/Italic).")
     parser.add_argument("target", nargs="?", default="all",
-                        choices=["ttf", "woff", "woff2", "subsets", "all"],
-                        help="build target (default: all = ttf + woff + woff2 + subsets)")
+                        choices=["ttf", "woff", "woff2", "all"],
+                        help="build target (default: all = ttf + woff + woff2)")
     parser.add_argument("--amount", type=float, default=DEFAULT_AMOUNT,
                         help="emboldening amount in font units at 2048 UPM; "
                              "H stem 207 -> 222/227/232/237 for 15/20/25/30 "
@@ -488,13 +429,10 @@ def main():
         build_woff()
     elif args.target == "woff2":
         build_woff2()
-    elif args.target == "subsets":
-        build_subsets(args.amount, embolden)
     elif args.target == "all":
         build_ttf(args.amount, embolden)
         build_woff()
         build_woff2()
-        build_subsets(args.amount, embolden)
 
 
 if __name__ == "__main__":
