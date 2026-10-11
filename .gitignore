@@ -1,2 +1,4 @@
 *.zip
 PlumMono-ttf
+gen/
+__pycache__/
