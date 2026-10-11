@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<glyph name="uni033B" format="1">
+  <advance width="0"/>
+  <unicode hex="033B"/>
+  <outline>
+    <contour>
+      <point x="-892" y="-209" type="line" name="hr00"/>
+      <point x="-341" y="-209" type="line" name="dv04"/>
+      <point x="-341" y="-759" type="line" name="dv01"/>
+      <point x="-892" y="-759" type="line"/>
+    </contour>
+    <contour>
+      <point x="-478" y="-623" type="line" name="dv02"/>
+      <point x="-478" y="-345" type="line" name="dv03"/>
+      <point x="-755" y="-345" type="line"/>
+      <point x="-755" y="-623" type="line"/>
+    </contour>
+  </outline>
+</glyph>

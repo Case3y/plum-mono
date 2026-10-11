@@ -2,65 +2,111 @@
 # -*- coding: utf-8 -*-
 # /////////////////////////////////////////////////////////////////
 #
-#  Usage: python build.py [ttf|woff|woff2|subsets|all] (--install-deps)
+#  Usage: python build.py [ttf|woff|woff2|all]
+#                         (--alt none|all|<label>[,<label>...])
+#                         (--suffix SUF[,SUF...]) (--install-deps)
 #
-#  Output layout:
-#    build/ttf/hint/     ttfautohint-hinted ttf files
-#    build/ttf/unhint/   ttf files without ttfautohint hinting
-#    build/web/fonts/    woff + woff2 (complete and subset sets)
+#  Alt-glyph variants: source/alt-glyphs/<glyph>-<label>/<weight>/<glyph>.glif
+#  holds a drop-in replacement for <glyph> in that weight -- the part before
+#  the first "-" is the glyph being replaced, the part after is the variant
+#  label used to pick it with --alt.  A build overlays every folder whose
+#  label it selects onto a copy of the master UFOs (in gen/<family>/,
+#  generated -- never hand-edit) and renames the family.  source/ is the
+#  single hand-maintained source and is never modified.
+#
+#  The family-name suffix is specified explicitly with --suffix (default
+#  "Custom"), matched to the selected variants in order; the unmodified
+#  master keeps the bare family name.
+#
+#    --alt none                          unmodified family   "Plum Mono"
+#    --alt dotted                        the dotted variant  "Plum Mono Custom"
+#    --alt dotted --suffix SlashedZero   "Plum Mono SlashedZero"
+#    --alt dotted,foo --suffix One,Two   two variants, two suffixes
+#    --alt all                           base + every variant (default)
+#
+#  Output layout (PlumMono[-SUF] is the family name without spaces):
+#    gen/PlumMono[-SUF]/           generated variant sources (do not edit)
+#    build/ttf/PlumMono[-SUF]/     ttf files (unhinted)
+#    build/web/PlumMono[-SUF]/     woff + woff2
 #
 #  Dependencies (conda activate develop):
 #    fontmake, fonttools, zopfli, brotli (pip)
-#    ttfautohint executable (the ttfautohint-py bundled build is preferred)
 #
 #  NOTE: woff and woff2 builds require that you build the ttf files
-#        first (python build.py ttf).  They convert the hinted ttf
-#        builds, not the UFO source files.
+#        first (python build.py ttf).  They convert the ttf builds,
+#        not the UFO source files.
 #
 # /////////////////////////////////////////////////////////////////
 
 import argparse
 import importlib.util
-import os
+import plistlib
+import re
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-# ttfautohint local install path from ttfautohint-build.sh (upstream default
-# location).  This is revised to ttfautohint on the user's PATH if the local
-# install is not identified.
-TTFAH_LOCAL = Path.home() / "ttfautohint-build" / "local" / "bin" / "ttfautohint"
+# The four Plum Mono variants in upstream build order
+VARIANTS = ("Regular", "Bold", "Italic", "BoldItalic")
 
-# The four Plum Mono variants in upstream build order, mapped to their
-# ttfautohint -H (hinting range min) values from build-ttf.sh / build-subsets.sh
-VARIANTS = {
-    "Regular": "181",
-    "Bold": "260",
-    "Italic": "145",
-    "BoldItalic": "265",
+# alt-glyphs weight folder for each build variant
+WEIGHT_DIR = {
+    "Regular": "regular",
+    "Bold": "bold",
+    "Italic": "italic",
+    "BoldItalic": "bolditalic",
 }
-
-# ttfautohint flags shared by the ttf and subsets builds (verbatim from upstream)
-TTFAH_FLAGS = ["-l", "6", "-r", "50", "-x", "10", "-D", "latn", "-f", "latn",
-               "-a", "qsq", "-W", "-t", "-X", "", "-I"]
 
 REPO_ROOT = Path(__file__).resolve().parent
 MASTER_TTF = REPO_ROOT / "master_ttf"
-TTF_BUILD = REPO_ROOT / "build" / "ttf"
-HINT_TTF = TTF_BUILD / "hint"      # ttfautohint-hinted ttf files
-UNHINT_TTF = TTF_BUILD / "unhint"  # ttf files without ttfautohint hinting
-WEB_BUILD = REPO_ROOT / "build" / "web" / "fonts"
-TEMP_SOURCE = REPO_ROOT / "source" / "temp"
+GEN_SRC = REPO_ROOT / "gen"
+ALT_GLYPHS = REPO_ROOT / "source" / "alt-glyphs"
 
-# web font output names (lowercase: plummono-<style>[-subset].woff[2])
-WEB_NAMES = {
-    "Regular": "plummono-regular",
-    "Bold": "plummono-bold",
-    "Italic": "plummono-italic",
-    "BoldItalic": "plummono-bolditalic",
-}
+# --- alt-glyph variants ---------------------------------------------------
+# The unmodified master is built as-is; an alt-glyph variant builds a family
+# with an explicit --suffix appended to the name, so they can be installed
+# side by side.
+BASE_FAMILY = "Plum Mono"    # family name of the unmodified master
+BASE_PS = "PlumMono"         # PostScript / output name stem of the master
+DEFAULT_SUFFIX = "Custom"    # --suffix default for alt-glyph variants
+
+
+def family_name(suffix):
+    return BASE_FAMILY if not suffix else f"{BASE_FAMILY} {suffix}"
+
+
+def ps_stem(suffix):
+    """PostScript name stem: no spaces, no hyphens (hyphen separates style)."""
+    return BASE_PS + "".join(c for c in suffix if c.isalnum())
+
+
+def name_token(suffix):
+    """Output folder name and ttf file stem: the family name without spaces."""
+    if not suffix:
+        return BASE_PS
+    return f"{BASE_PS}-{'-'.join(suffix.split())}"
+
+
+def web_token(suffix):
+    return name_token(suffix).lower()
+
+
+def ttf_dir(suffix):
+    return REPO_ROOT / "build" / "ttf" / name_token(suffix)
+
+
+def web_dir(suffix):
+    return REPO_ROOT / "build" / "web" / name_token(suffix)
+
+
+def ttf_name(suffix, variant):
+    return f"{name_token(suffix)}-{variant}.ttf"
+
+
+def web_name(suffix, variant, ext):
+    return f"{web_token(suffix)}-{variant.lower()}.{ext}"
 
 
 def fail(message):
@@ -68,26 +114,7 @@ def fail(message):
     sys.exit(1)
 
 
-def find_ttfautohint():
-    # Prefer the ttfautohint executable bundled with the ttfautohint-py wheel:
-    # the official ttfautohint 1.8.4 Windows build cannot load -R reference
-    # fonts at all ("unknown file format"), which the subsets build requires.
-    bundled_name = "ttfautohint.exe" if sys.platform == "win32" else "ttfautohint"
-    try:
-        import ttfautohint as ttfa_py
-        bundled = Path(ttfa_py.__file__).parent / bundled_name
-        if bundled.is_file() and os.access(bundled, os.X_OK):
-            return str(bundled)
-    except ImportError:
-        pass
-    if shutil.which("ttfautohint"):
-        return "ttfautohint"
-    if TTFAH_LOCAL.is_file():
-        return str(TTFAH_LOCAL)
-    return None
-
-
-def confirm_dependencies(require_ttfautohint=True):
+def confirm_dependencies():
     print("Confirming that build dependencies are installed...")
     print(" ")
     problems = []
@@ -97,19 +124,11 @@ def confirm_dependencies(require_ttfautohint=True):
     if importlib.util.find_spec("fontTools") is None:
         problems.append("The fontTools library was not found.  Install it with "
                         "'pip install fonttools', then attempt your build again.")
-    ttfa = find_ttfautohint()
-    if require_ttfautohint and ttfa is None:
-        problems.append("ttfautohint was not found (neither on your PATH nor at "
-                        f"{TTFAH_LOCAL}).  Install the official ttfautohint build, "
-                        "then attempt your build again.")
-    if require_ttfautohint and ttfa is not None:
-        print("ttfautohint executable identified")
     if problems:
         for problem in problems:
             print(problem, file=sys.stderr)
         print("Build canceled.", file=sys.stderr)
         sys.exit(1)
-    return ttfa
 
 
 def remove_dir(path):
@@ -134,16 +153,167 @@ def clean_master_ttf():
         remove_dir(MASTER_TTF)
 
 
-def run_fontmake(ufo_path, subset=False):
+def run_fontmake(ufo_path):
     """Build one UFO source to a ttf in master_ttf/ (fontmake's default output
     directory for static ttf builds)."""
     command = [shutil.which("fontmake")]
-    if subset:
-        command.append("--subset")
     command += ["-u", str(ufo_path), "-o", "ttf"]
     result = subprocess.run(command, cwd=REPO_ROOT)
     if result.returncode != 0:
         fail(f"Unable to build the {ufo_path.name} variant set.  Build canceled.")
+
+
+# ----------------------------------------------------------------------
+# Alt-glyph variants (single master -> gen/<family>/)
+# ----------------------------------------------------------------------
+
+def discover_labels():
+    """Every variant label found under source/alt-glyphs (the part after the
+    first "-" of each <glyph>-<label> folder)."""
+    if not ALT_GLYPHS.is_dir():
+        return []
+    labels = set()
+    for entry in ALT_GLYPHS.iterdir():
+        if entry.is_dir():
+            if "-" not in entry.name:
+                fail(f"source/alt-glyphs/{entry.name} must be named "
+                     "'<glyph>-<label>' (glyph to replace, then the label).")
+            labels.add(entry.name.split("-", 1)[1])
+    return sorted(labels)
+
+
+def resolve_selection(alt_value, suffix_value):
+    """Turn --alt / --suffix into [(label, suffix), ...] to build, where
+    label None means the unmodified master (always built with no suffix)."""
+    labels = discover_labels()
+    if alt_value == "all":
+        selected = [None, *labels]
+    elif alt_value == "none":
+        selected = [None]
+    else:
+        selected = [item.strip() for item in alt_value.split(",") if item.strip()]
+        unknown = [item for item in selected if item not in labels]
+        if unknown:
+            available = ", ".join(labels) if labels else "(none found)"
+            fail(f"unknown alt-glyph label(s): {', '.join(unknown)}.  "
+                 f"Available: {available}")
+
+    suffixes = [item.strip() for item in suffix_value.split(",")] \
+        if suffix_value.strip() else []
+    selection = []
+    index = 0
+    for label in selected:
+        if label is None:
+            selection.append((None, ""))
+            continue
+        suffix = suffixes[index] if index < len(suffixes) else DEFAULT_SUFFIX
+        index += 1
+        selection.append((label, suffix))
+
+    tokens = [name_token(suffix) for _label, suffix in selection]
+    clashes = sorted({t for t in tokens if tokens.count(t) > 1})
+    if clashes:
+        fail("variants share the same output name "
+             f"({', '.join(clashes)}); give distinct --suffix values.")
+    return selection
+
+
+def collect_overlays(label):
+    """Map each build variant to {glyph name: replacement glif} for this label
+    (empty for the base variant)."""
+    overlays = {variant: {} for variant in VARIANTS}
+    if label is None:
+        return overlays
+    for entry in sorted(ALT_GLYPHS.iterdir()):
+        if not entry.is_dir() or "-" not in entry.name:
+            continue
+        glyph, entry_label = entry.name.split("-", 1)
+        if entry_label != label:
+            continue
+        for variant in VARIANTS:
+            glif = entry / WEIGHT_DIR[variant] / f"{glyph}.glif"
+            if not glif.is_file():
+                fail(f"{entry.name}: expected a replacement at "
+                     f"{WEIGHT_DIR[variant]}/{glyph}.glif")
+            overlays[variant][glyph] = glif
+    return overlays
+
+
+def materialize_variant(label, suffix):
+    """Copy the master UFOs into gen/<family>/ and overlay this variant's
+    alt-glyph replacements (none for the base variant)."""
+    overlays = collect_overlays(label)
+    root = GEN_SRC / name_token(suffix)
+    if root.is_dir():
+        remove_dir(root)
+    root.mkdir(parents=True)
+
+    for variant in VARIANTS:
+        master = REPO_ROOT / "source" / f"PlumMono-{variant}.ufo"
+        target = root / f"PlumMono-{variant}.ufo"
+        shutil.copytree(master, target)
+        for glyph, glif in overlays[variant].items():
+            overlay_glyph(target, glyph, glif)
+        if suffix:
+            rename_family(target / "fontinfo.plist", suffix, variant)
+
+    print(f"generated {family_name(suffix)} variant sources in {root}")
+    return root
+
+
+def overlay_glyph(ufo, glyph, alt_glif_path):
+    """Replace the outline of <glyph> in the copied UFO with the alt glif's,
+    keeping the master's name, Unicode mapping, advance width and lib."""
+    glyph_file = ufo / "glyphs" / f"{glyph}.glif"
+    if not glyph_file.is_file():
+        fail(f"{alt_glif_path} replaces '{glyph}', but {ufo.name} has no "
+             f"glyphs/{glyph}.glif.")
+
+    master_text = glyph_file.read_text(encoding="utf-8")
+    alt_text = alt_glif_path.read_text(encoding="utf-8")
+
+    alt_name = re.search(r'<glyph name="([^"]*)"', alt_text)
+    if not alt_name or alt_name.group(1) != glyph:
+        found = alt_name.group(1) if alt_name else "?"
+        fail(f"{alt_glif_path}: glyph name is '{found}', expected '{glyph}'.")
+
+    # the monospace advance must not change
+    master_width = re.search(r'<advance[^>]*width="([^"]*)"', master_text)
+    alt_width = re.search(r'<advance[^>]*width="([^"]*)"', alt_text)
+    master_width = master_width.group(1) if master_width else None
+    alt_width = alt_width.group(1) if alt_width else None
+    if alt_width != master_width:
+        fail(f"{alt_glif_path}: advance width {alt_width} does not match "
+             f"{glyph} ({master_width}) -- the monospace layout must not change.")
+
+    outline_re = re.compile(r"<outline>.*?</outline>", re.S)
+    alt_outline = outline_re.search(alt_text)
+    master_outline = outline_re.search(master_text)
+    if master_outline:
+        replacement = alt_outline.group(0) if alt_outline else ""
+        master_text = (master_text[:master_outline.start()] + replacement +
+                       master_text[master_outline.end():])
+    elif alt_outline:
+        master_text = master_text.replace(
+            "</glyph>", f"  {alt_outline.group(0)}\n</glyph>", 1)
+    glyph_file.write_text(master_text, encoding="utf-8", newline="")
+
+
+def rename_family(fontinfo_path, suffix, variant):
+    """Give the variant a suffix-specific family so it can be installed
+    alongside the base family."""
+    family = family_name(suffix)
+    ps_name = f"{ps_stem(suffix)}-{variant}"
+    fontinfo = plistlib.loads(fontinfo_path.read_bytes())
+    style_name = fontinfo.get("styleName", variant)
+    fontinfo["familyName"] = family
+    fontinfo["styleMapFamilyName"] = family
+    fontinfo["postscriptFontName"] = ps_name
+    fontinfo["postscriptFullName"] = f"{family} {style_name}"
+    fontinfo["openTypeNamePreferredFamilyName"] = family
+    fontinfo["openTypeNameCompatibleFullName"] = f"{family} {style_name}"
+    fontinfo["openTypeNameUniqueID"] = f"{ps_name}: 2026"
+    fontinfo_path.write_bytes(plistlib.dumps(fontinfo, sort_keys=False))
 
 
 # ----------------------------------------------------------------------
@@ -185,28 +355,6 @@ def apply_postbuild_fixes():
 
 
 # ----------------------------------------------------------------------
-# Hinting (ttfautohint)
-# ----------------------------------------------------------------------
-
-def hint_ttf(ttfa, ttf_path, subset=False):
-    variant = ttf_path.stem.replace("PlumMono-", "")
-    hinted_dir = MASTER_TTF / "hinted"
-    hinted_dir.mkdir(exist_ok=True)
-    control_file = REPO_ROOT / "tt-hinting" / f"PlumMono-{variant}-TA.txt"
-    command = [ttfa, *TTFAH_FLAGS, "-H", VARIANTS[variant]]
-    if subset:
-        # upstream build-subsets.sh uses the regular set as the x-height reference
-        command += ["-R", str(MASTER_TTF / "PlumMono-Regular.ttf")]
-    command += ["-m", str(control_file), str(ttf_path), str(hinted_dir / ttf_path.name)]
-    result = subprocess.run(command, cwd=REPO_ROOT)
-    if result.returncode != 0:
-        kind = "variant subset" if subset else "variant set"
-        fail(f"Unable to execute ttfautohint on the PlumMono-{variant} {kind}.  Build canceled.")
-    suffix = " subset" if subset else ""
-    print(f"master_ttf/{ttf_path.name}{suffix} - successful hinting with ttfautohint")
-
-
-# ----------------------------------------------------------------------
 # Web font conversion (pure Python replacements for sfnt2woff-zopfli
 # and woff2_compress)
 # ----------------------------------------------------------------------
@@ -236,166 +384,100 @@ def convert_web_font(ttf_path, output_path, flavor):
 # Build targets
 # ----------------------------------------------------------------------
 
-def build_ttf():
-    ttfa = confirm_dependencies()
-    clean_master_ttf()
+def build_ttf(selection):
+    confirm_dependencies()
 
     print(" ")
     print("Starting build...")
     print(" ")
 
-    # reset the output folders (and drop legacy flat ttf files from old builds)
-    for folder in (HINT_TTF, UNHINT_TTF):
-        if folder.is_dir():
-            remove_dir(folder)
-        folder.mkdir(parents=True, exist_ok=True)
-    for legacy in TTF_BUILD.glob("PlumMono-*.ttf"):
-        legacy.unlink()
+    for label, suffix in selection:
+        src_root = materialize_variant(label, suffix)
+        clean_master_ttf()
 
-    for variant in VARIANTS:
-        ufo_path = REPO_ROOT / "source" / f"PlumMono-{variant}.ufo"
-        run_fontmake(ufo_path)
+        out_dir = ttf_dir(suffix)
+        # reset the output folder (also drops any legacy flat ttf layout)
+        if out_dir.is_dir():
+            remove_dir(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    apply_postbuild_fixes()
+        for variant in VARIANTS:
+            run_fontmake(src_root / f"PlumMono-{variant}.ufo")
 
-    # unhinted set: the fixed master files, before ttfautohint processing
-    for variant in VARIANTS:
-        shutil.copy2(MASTER_TTF / f"PlumMono-{variant}.ttf",
-                     UNHINT_TTF / f"PlumMono-{variant}.ttf")
+        apply_postbuild_fixes()
 
-    print(" ")
-    print("Attempting ttfautohint hinting...")
-    print(" ")
-    for variant in VARIANTS:
-        hint_ttf(ttfa, MASTER_TTF / f"PlumMono-{variant}.ttf")
+        print(" ")
+        for variant in VARIANTS:
+            target = out_dir / ttf_name(suffix, variant)
+            shutil.copy2(MASTER_TTF / f"PlumMono-{variant}.ttf", target)
+            print(f"{family_name(suffix)} {variant} ttf build path: {target}")
 
-    print(" ")
-    for variant in VARIANTS:
-        shutil.move(str(MASTER_TTF / "hinted" / f"PlumMono-{variant}.ttf"),
-                    str(HINT_TTF / f"PlumMono-{variant}.ttf"))
-        print(f"{variant} unhinted ttf build path: {UNHINT_TTF / f'PlumMono-{variant}.ttf'}")
-        print(f"{variant} hinted ttf build path: {HINT_TTF / f'PlumMono-{variant}.ttf'}")
-
-    remove_dir(MASTER_TTF)
+        remove_dir(MASTER_TTF)
 
 
-def require_ttf_builds():
-    missing = [v for v in VARIANTS if not (HINT_TTF / f"PlumMono-{v}.ttf").is_file()]
+def require_ttf_builds(suffix):
+    missing = [v for v in VARIANTS
+               if not (ttf_dir(suffix) / ttf_name(suffix, v)).is_file()]
     if missing:
-        fail(f"hinted ttf build(s) not found for: {', '.join(missing)}.  "
-             "Build the ttf files first with 'python build.py ttf'.")
+        fail(f"{family_name(suffix)} ttf build(s) not found for: "
+             f"{', '.join(missing)}.  Build the ttf files first with "
+             "'python build.py ttf'.")
 
 
-def build_woff():
-    require_ttf_builds()
+def build_woff(selection):
+    for _label, suffix in selection:
+        require_ttf_builds(suffix)
     enable_zopfli_woff()
     print("Beginning web font build with fontTools + zopfli")
-    WEB_BUILD.mkdir(parents=True, exist_ok=True)
-    for variant in VARIANTS:
-        ttf_path = HINT_TTF / f"PlumMono-{variant}.ttf"
-        woff_path = WEB_BUILD / f"{WEB_NAMES[variant]}.woff"
-        try:
-            convert_web_font(ttf_path, woff_path, "woff")
-        except OSError as error:
-            fail(f"Failed to build {woff_path.name} from {ttf_path.name}: {error}")
-        print(f"{variant} woff set successfully built from {ttf_path.name}")
-    print(" ")
-    for variant in VARIANTS:
-        print(f"{variant} woff build path: {WEB_BUILD / f'{WEB_NAMES[variant]}.woff'}")
+    for _label, suffix in selection:
+        out_dir = web_dir(suffix)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for variant in VARIANTS:
+            ttf_path = ttf_dir(suffix) / ttf_name(suffix, variant)
+            woff_path = out_dir / web_name(suffix, variant, "woff")
+            try:
+                convert_web_font(ttf_path, woff_path, "woff")
+            except OSError as error:
+                fail(f"Failed to build {woff_path.name} from {ttf_path.name}: {error}")
+            print(f"{family_name(suffix)} {variant} woff set successfully built "
+                  f"from {ttf_path.name}")
+        print(" ")
+        for variant in VARIANTS:
+            print(f"{family_name(suffix)} {variant} woff build path: "
+                  f"{out_dir / web_name(suffix, variant, 'woff')}")
 
 
-def build_woff2():
-    require_ttf_builds()
+def build_woff2(selection):
     try:
         import brotli  # noqa: F401
     except ImportError:
         fail("The brotli library was not found.  Install it with "
              "'pip install brotli', then attempt your build again.")
+    for _label, suffix in selection:
+        require_ttf_builds(suffix)
     print("Beginning web font build with fontTools + brotli")
-    WEB_BUILD.mkdir(parents=True, exist_ok=True)
-    for variant in VARIANTS:
-        ttf_path = HINT_TTF / f"PlumMono-{variant}.ttf"
-        woff2_path = WEB_BUILD / f"{WEB_NAMES[variant]}.woff2"
-        try:
-            convert_web_font(ttf_path, woff2_path, "woff2")
-        except OSError as error:
-            fail(f"Failed to build woff2 from {ttf_path.name}: {error}")
-        print(f"{variant} woff2 set successfully built from {ttf_path.name}")
-    print(" ")
-    for variant in VARIANTS:
-        print(f"{variant} woff2 build path: {WEB_BUILD / f'{WEB_NAMES[variant]}.woff2'}")
-
-
-def build_subsets():
-    ttfa = confirm_dependencies()
-    clean_master_ttf()
-
-    # create temporary source files with lib.plist replacements that include
-    # the subset definitions from source/subset-lib
-    if TEMP_SOURCE.exists():
-        shutil.rmtree(TEMP_SOURCE)
-    TEMP_SOURCE.mkdir()
-
-    subset_lib = REPO_ROOT / "source" / "subset-lib"
-    for variant in VARIANTS:
-        temp_ufo = TEMP_SOURCE / f"PlumMono-{variant}.ufo"
-        shutil.copytree(REPO_ROOT / "source" / f"PlumMono-{variant}.ufo", temp_ufo)
-        shutil.copy2(subset_lib / f"lib-{variant.lower()}.plist", temp_ufo / "lib.plist")
-
-    print("Starting web font subset build...")
-    print(" ")
-    for variant in VARIANTS:
-        run_fontmake(TEMP_SOURCE / f"PlumMono-{variant}.ufo", subset=True)
-
-    apply_postbuild_fixes()
-
-    print(" ")
-    print("Attempting ttfautohint hinting...")
-    print(" ")
-    for variant in VARIANTS:
-        hint_ttf(ttfa, MASTER_TTF / f"PlumMono-{variant}.ttf", subset=True)
-    print(" ")
-
-    enable_zopfli_woff()
-    WEB_BUILD.mkdir(parents=True, exist_ok=True)
-
-    # NOTE: upstream build-subsets.sh converts the unhinted master_ttf files
-    # (the hinted copies in master_ttf/hinted are never used) - replicated here
-    for variant in VARIANTS:
-        ttf_path = MASTER_TTF / f"PlumMono-{variant}.ttf"
-        try:
-            convert_web_font(ttf_path, WEB_BUILD / f"{WEB_NAMES[variant]}-subset.woff", "woff")
-        except OSError as error:
-            fail(f"Failed to build woff subset from {ttf_path.name}: {error}")
-        print(f"{variant} woff subset successfully built from {ttf_path.name}")
-    print(" ")
-    for variant in VARIANTS:
-        ttf_path = MASTER_TTF / f"PlumMono-{variant}.ttf"
-        try:
-            convert_web_font(ttf_path, WEB_BUILD / f"{WEB_NAMES[variant]}-subset.woff2", "woff2")
-        except OSError as error:
-            fail(f"Failed to build woff2 subset from {ttf_path.name}: {error}")
-        print(f"{variant} woff2 font subset successfully built from {ttf_path.name}")
-
-    print(" ")
-    print("Moving web font subset files to build directory...")
-    for variant in VARIANTS:
-        print(f"{variant} woff build path: {WEB_BUILD / f'{WEB_NAMES[variant]}-subset.woff'}")
-        print(f"{variant} woff2 build path: {WEB_BUILD / f'{WEB_NAMES[variant]}-subset.woff2'}")
-
-    remove_dir(MASTER_TTF)
-    remove_dir(TEMP_SOURCE)
+    for _label, suffix in selection:
+        out_dir = web_dir(suffix)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for variant in VARIANTS:
+            ttf_path = ttf_dir(suffix) / ttf_name(suffix, variant)
+            woff2_path = out_dir / web_name(suffix, variant, "woff2")
+            try:
+                convert_web_font(ttf_path, woff2_path, "woff2")
+            except OSError as error:
+                fail(f"Failed to build woff2 from {ttf_path.name}: {error}")
+            print(f"{family_name(suffix)} {variant} woff2 set successfully built "
+                  f"from {ttf_path.name}")
+        print(" ")
+        for variant in VARIANTS:
+            print(f"{family_name(suffix)} {variant} woff2 build path: "
+                  f"{out_dir / web_name(suffix, variant, 'woff2')}")
 
 
 def install_deps():
     print("Installing Python build dependencies with pip...")
     subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade",
                     "fontmake", "fonttools", "zopfli", "brotli"], check=False)
-    print(" ")
-    print("NOTE: the ttfautohint executable cannot be installed with pip.")
-    print("Install it from https://www.freetype.org/ttfautohint/ (official")
-    print("Windows builds available) and make sure ttfautohint(.exe) is on")
-    print("your PATH before building.")
 
 
 def main():
@@ -404,32 +486,40 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(
-	        description="Python build pipeline for the Plum Mono typeface "
-                    "(port of build-ttf.sh / build-woff.sh / build-woff2.sh / build-subsets.sh).")
+        description="Python build pipeline for the Plum Mono typeface "
+                    "(port of build-ttf.sh / build-woff.sh / build-woff2.sh).")
     parser.add_argument("target", nargs="?", default="all",
-                        choices=["ttf", "woff", "woff2", "subsets", "all"],
-                        help="build target (default: all = ttf + woff + woff2 + subsets)")
+                        choices=["ttf", "woff", "woff2", "all"],
+                        help="build target (default: all = ttf + woff + woff2)")
+    parser.add_argument("--alt", default="all",
+                        help="alt-glyph variant(s) to build: a label, a "
+                             "comma-separated list, 'all' (base + every "
+                             "variant) or 'none' (base only); default all")
+    parser.add_argument("--suffix", default="",
+                        help="family-name suffix for the alt-glyph variants, "
+                             "matched to the selected variants in order "
+                             "(comma-separated for several); "
+                             f"default {DEFAULT_SUFFIX!r}")
     parser.add_argument("--install-deps", action="store_true",
                         help="install the Python build dependencies with pip, then exit")
     args = parser.parse_args()
+
+    selection = resolve_selection(args.alt, args.suffix)
 
     if args.install_deps:
         install_deps()
         return
 
     if args.target == "ttf":
-        build_ttf()
+        build_ttf(selection)
     elif args.target == "woff":
-        build_woff()
+        build_woff(selection)
     elif args.target == "woff2":
-        build_woff2()
-    elif args.target == "subsets":
-        build_subsets()
+        build_woff2(selection)
     elif args.target == "all":
-        build_ttf()
-        build_woff()
-        build_woff2()
-        build_subsets()
+        build_ttf(selection)
+        build_woff(selection)
+        build_woff2(selection)
 
 
 if __name__ == "__main__":
